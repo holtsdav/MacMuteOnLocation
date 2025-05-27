@@ -4,6 +4,15 @@
 
 MacMuteOnLocation is a macOS menu bar application that automatically mutes your Mac's volume when you're at specific locations.
 
+## Important Install Instructions
+**Apple will say the App is Damaged if you don't follow Step 3**
+
+1. Unzip the File
+2. Move the .app File to the Applications Folder
+3. Paste this into your Terminal (**Required** Since i don't have an Apple Developer Account)
+`sudo xattr -rd com.apple.quarantine /Applications/MacMuteOnLocation.app`  _(Admin Permission Required)_
+4. Enjoy
+   
 ## Features
 
 - 🔇 **Automatic Volume Control**: Mutes/unmutes your Mac's volume based on your current location.
