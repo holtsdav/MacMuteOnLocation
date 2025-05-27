@@ -1,47 +1,48 @@
 # MacMuteOnLocation
 
-> **Note:** This application was created heavily with AI assistance, leveraging modern AI tools to accelerate development and ensure best practices.
+> **Note:** This application was created heavily with AI assistance.
 
-MacMuteOnLocation is a macOS menu bar application that automatically mutes your microphone when you're at specific locations. Perfect for maintaining privacy during work-from-home scenarios or when you're in sensitive locations.
+MacMuteOnLocation is a macOS menu bar application that automatically mutes your Mac's volume when you're at specific locations.
 
 ## Features
 
-- 🎤 **Automatic Microphone Control**: Mutes/unmutes your microphone based on your current location
-- 📍 **Location-Based Triggers**: Set specific locations where you want your microphone to be automatically muted
-- 🔒 **Privacy-Focused**: All location data is stored locally on your device
-- 🖥️ **Menu Bar Integration**: Clean, minimal interface that lives in your macOS menu bar
-- ⚡ **Lightweight**: Minimal system resource usage
-- 🎯 **Template Icon**: Automatically adapts to light/dark mode
-- 🔧 **Configurable**: Customizable location radius and check intervals
-- 🚀 **Launch at Login**: Optional automatic startup when you log in to macOS
+- 🔇 **Automatic Volume Control**: Mutes/unmutes your Mac's volume based on your current location.
+- 📍 **Location-Based Triggers**: Set specific locations where you want your Mac's volume to be automatically muted.
+- 💾 **Status Persistence**: Remembers the mute state and saved locations between launches using a local JSON file.
+- 🔒 **Privacy-Focused**: All location data and settings are stored locally on your device.
+- 🖥️ **Menu Bar Integration**: Clean, minimal interface that lives in your macOS menu bar.
+- ⚡ **Lightweight**: Minimal system resource usage.
+- 🔧 **Configurable**: Customizable location radius and check intervals.
+- 🚀 **Launch at Login**: Requires *manual* setup via System Settings or Finder to launch automatically at login.
 
 ## Requirements
 
+- Not Sure if Intel Macs are supported
 - macOS 10.14 (Mojave) or later
 - Location Services enabled
-- Microphone access permission
 
 ## Installation
 
 ### Option 1: Download Pre-built App (Recommended)
 
-1. Download the latest release from the [Releases](../../releases) page
+1. Download the latest release from the [Releases](https://github.com/holtsdav/MacMuteOnLocation/releases) page
 2. Unzip the downloaded file
 3. Move `MacMuteOnLocation.app` to your Applications folder
 4. Right-click the app and select "Open" (required for first launch due to macOS security)
 
-### Option 2: Build from Source
+### Option 2: Build from Source (Not checked the Readme might include Errors)
 
 #### Prerequisites
 
 - Python 3.8 or later
-- Xcode Command Line Tools: `xcode-select --install`
+- Xcode Command Line Tools: `xcode-select --install` (may not be required)
+- py2app: `pip install py2app` (or will be auto-installed during build)
 
-#### Build Steps
+#### Build Steps (Not testet)
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/MacMuteOnLocation.git
+   git clone https://github.com/holtsdav/MacMuteOnLocation.git
    cd MacMuteOnLocation
    ```
 
@@ -90,10 +91,10 @@ MacMuteOnLocation is a macOS menu bar application that automatically mutes your 
 
 The app requires the following permissions:
 
-- **Location Services**: To determine your current location
-- **Microphone Access**: To control microphone mute/unmute functionality
+- **Location Services**: To determine your current location.
+- **System Events/Accessibility**: May be required depending on the method used to control system volume.
 
-All permissions are requested on first launch and can be managed in System Preferences > Security & Privacy.
+Permissions are typically requested on first launch and can be managed in System Settings > Privacy & Security.
 
 ## Privacy
 
@@ -102,38 +103,28 @@ All permissions are requested on first launch and can be managed in System Prefe
 - Location tracking only occurs when the app is running
 - You can delete all stored locations at any time
 
-## Development
 
 ### Project Structure
 
 ```
 MacMuteOnLocation/
 ├── main.py                 # Main application entry point
-├── setup.py               # py2app build configuration
-├── build_app.sh           # Build script
-├── requirements.txt       # Python dependencies
-├── app_icon.icns         # Application icon
-├── icon.iconset/         # Icon source files
-├── location_dark.png     # Menu bar icon
-├── .gitignore            # Git ignore rules
-└── README.md             # This file
+├── setup.py                # py2app build configuration
+├── build_app.sh            # Build script
+├── requirements.txt        # Python dependencies
+├── app_icon.icns           # Application icon
+├── icon.iconset/           # Icon source files
+├── location_dark.png       # Menu bar icon
+├── .gitignore              # Git ignore rules
+└── README.md               # This file
 ```
 
 ### Dependencies
 
 - **rumps**: Menu bar application framework
-- **pyobjc**: Python-Objective-C bridge for macOS APIs
-- **py2app**: Python to macOS app bundler
-- **jaraco.text**: Text processing utilities
+- **pyobjc-framework-CoreLocation**: Python bridge for Core Location services
+- **pyobjc-framework-Foundation**: Core Python-Objective-C bridge for macOS APIs
 
-### Building Icons
-
-To rebuild the app icon from the iconset:
-
-```bash
-iconutil -c icns icon.iconset
-mv icon.icns app_icon.icns
-```
 
 ### Development Setup
 
@@ -168,25 +159,9 @@ mv icon.icns app_icon.icns
 - Ensure the app has location permission
 - Try moving to a different location and back
 
-### Microphone Not Muting
-- Check microphone permissions in System Preferences > Security & Privacy
-- Verify your microphone is working in other applications
-- Restart the app if issues persist
 
-### Build Issues
 
-#### Carbon Framework Error
-If you encounter Carbon framework loading issues:
-- The current setup.py configuration excludes Carbon framework
-- Ensure `argv_emulation=False` in py2app options
 
-#### Missing Dependencies
-If you get `ModuleNotFoundError` for jaraco.text:
-```bash
-pip install jaraco.text
-```
-
-## Technical Notes
 
 ### Resolved Issues
 
@@ -211,12 +186,15 @@ pip install jaraco.text
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License.
+You are free to use, modify, and distribute this software for non-commercial purposes, provided you give appropriate credit to the original author. - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
 - Built with [rumps](https://github.com/jaredks/rumps) for menu bar integration
 - Uses macOS Core Location framework for location services
+- Uses AppKit framework for system integration and appearance detection
+- Uses subprocess module for system volume control via osascript
 - Icon design inspired by macOS Human Interface Guidelines
 - Developed with AI assistance for rapid prototyping and best practices
 
@@ -224,10 +202,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues or have questions:
 
-1. Check the [Issues](../../issues) page for existing solutions
+1. Check the [Issues](https://github.com/holtsdav/MacMuteOnLocation/issues) page for existing solutions
 2. Create a new issue with detailed information about your problem
 3. Include your macOS version and any relevant error messages
 
 ---
 
-**Note**: This app is designed for personal use and privacy. Always ensure you comply with local laws and regulations regarding location tracking and microphone usage.
+**Note**: This app is designed for personal use and privacy. Always ensure you comply with local laws and regulations regarding location tracking usage.
