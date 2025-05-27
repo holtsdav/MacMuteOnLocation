@@ -161,20 +161,12 @@ MacMuteOnLocation/
 
 
 
-
-
-### Resolved Issues
-
-1. **Carbon Framework Loading**: Disabled `argv_emulation` and excluded Carbon framework to prevent compatibility issues on modern macOS
-2. **Missing Dependencies**: Added jaraco.text and related packages to setup.py includes
-3. **Icon Configuration**: Properly configured app icon in both py2app options and plist settings
-
 ### macOS Compatibility
 
 - Tested on macOS 10.14+
 - Uses modern Core Location APIs
-- Follows macOS security model for location and microphone access
-
+- Follows macOS security model for location
+  
 ## Contributing
 
 1. Fork the repository
