@@ -10,8 +10,8 @@ MacMuteOnLocation is a macOS menu bar application that automatically mutes your 
 1. Unzip the File
 2. Move the .app File to the Applications Folder
 3. Paste this into your Terminal (**Required** Since i don't have an Apple Developer Account)
-   `sudo xattr -rd com.apple.quarantine /Applications/MacMuteOnLocation.app`  _(Admin Permission Required)_
-5. Enjoy
+`sudo xattr -rd com.apple.quarantine /Applications/MacMuteOnLocation.app`  _(Admin Permission Required)_
+6. Enjoy
    
 ## Features
 
