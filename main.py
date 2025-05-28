@@ -7,7 +7,9 @@ import math
 import threading
 import time
 import traceback
-from AppKit import NSApplication
+import subprocess
+from AppKit import NSApplication, NSWorkspace
+from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
     kCLLocationAccuracyHundredMeters,
@@ -42,6 +44,7 @@ class LocationMenubarApp(rumps.App):
         self.location_check_interval = 300  # Default to 5 minutes for better battery life
         self.launch_at_login = False
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.last_wake_time = time.time()
         
         # Initialize location manager and delegate
         self.location_manager = None
@@ -96,6 +99,9 @@ class LocationMenubarApp(rumps.App):
         # Start timers
         self.start_mute_sync_timer()
         
+        # Setup wake detection
+        self.setup_wake_detection()
+        
         # Template mode handles icon adaptation automatically
         print("Template mode enabled - icon adapts automatically to system appearance and wallpaper brightness")
         
@@ -115,10 +121,12 @@ class LocationMenubarApp(rumps.App):
             # Show immediate feedback
             rumps.notification("MacMuteOnLocation", "Status Changed", "Application is now ACTIVE - Location monitoring started", sound=False)
             self.start_location_timer()
+
         else:
             print("Application deactivated")
             rumps.notification("MacMuteOnLocation", "Status Changed", "Application is now INACTIVE - Location monitoring stopped", sound=False)
             self.stop_location_timer()
+
         
         # Save the status change
         self.save_target_locations()
@@ -663,11 +671,61 @@ Note: The app must be in your Applications folder for auto-start to work reliabl
         
         rumps.alert("Setup Auto-Start Instructions", instructions)
 
+    def setup_wake_detection(self):
+        """Setup system wake detection using NSWorkspace notifications"""
+        try:
+            workspace = NSWorkspace.sharedWorkspace()
+            notification_center = workspace.notificationCenter()
+            
+            # Register for wake notifications
+            notification_center.addObserver_selector_name_object_(
+                self,
+                "systemDidWake:",
+                "NSWorkspaceDidWakeNotification",
+                None
+            )
+            
+            # Register for sleep notifications
+            notification_center.addObserver_selector_name_object_(
+                self,
+                "systemWillSleep:",
+                "NSWorkspaceWillSleepNotification",
+                None
+            )
+            
+            print("Wake detection setup complete")
+        except Exception as e:
+            print(f"Error setting up wake detection: {e}")
+    
+    def systemDidWake_(self, notification):
+        """Called when system wakes up"""
+        print("System wake detected")
+        self.last_wake_time = time.time()
+        
+        if self.is_active:
+            # Immediately check location after wake
+            print("Requesting immediate location update after wake")
+            self.location_item.title = "📍 Location: Checking after wake..."
+            
+            # Request immediate location update
+            if self.location_manager:
+                try:
+                    auth_status = CLLocationManager.authorizationStatus()
+                    if auth_status in [kCLAuthorizationStatusAuthorizedAlways, kCLAuthorizationStatusAuthorizedWhenInUse]:
+                        self.location_manager.requestLocation()
+                except Exception as e:
+                    print(f"Error requesting location after wake: {e}")
+    
+    def systemWillSleep_(self, notification):
+        """Called when system is about to sleep"""
+        print("System will sleep")
+    
     def quit_app(self, _):
         print("Quitting application gracefully...")
         self.is_active = False
         self.stop_location_timer()
         self.stop_mute_sync_timer()
+
         
         if hasattr(self, 'location_manager') and self.location_manager:
             print("Stopping CoreLocation manager updates.")
