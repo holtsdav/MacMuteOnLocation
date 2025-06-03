@@ -42,6 +42,7 @@ class LocationMenubarApp(rumps.App):
         self.target_locations = []
         self.target_location_coords = {}
         self.location_check_interval = 300  # Default to 5 minutes for better battery life
+        self.only_scan_on_wakeup = False  # New setting for wakeup-only scanning
         self.launch_at_login = False
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.last_wake_time = time.time()
@@ -69,6 +70,9 @@ class LocationMenubarApp(rumps.App):
         }
         self.update_interval_menu()
         
+        # Create the wakeup-only toggle menu item
+        self.wakeup_only_item = rumps.MenuItem("⏰ Only Scan on Wakeup", callback=self.toggle_wakeup_only)
+        
         # Build menu structure with better organization
         self.menu = [
             self.status_item,
@@ -77,6 +81,7 @@ class LocationMenubarApp(rumps.App):
             None,  # Separator
             self.target_locations_menu,
             self.interval_item, # This will now be a submenu
+            self.wakeup_only_item, # New toggle for wakeup-only scanning
             None,  # Separator
             self.mute_item,
             rumps.MenuItem("🔄 Refresh Location", callback=self.refresh_location),
@@ -204,10 +209,33 @@ class LocationMenubarApp(rumps.App):
             self.location_manager.stopUpdatingLocation()
             self.location_manager.setDesiredAccuracy_(kCLLocationAccuracyHundredMeters)
     
+    def toggle_wakeup_only(self, _):
+        """Toggle between regular interval scanning and wakeup-only scanning"""
+        self.only_scan_on_wakeup = not self.only_scan_on_wakeup
+        
+        # Update menu item to show current state
+        if self.only_scan_on_wakeup:
+            self.wakeup_only_item.title = "✓ ⏰ Only Scan on Wakeup"
+            self.interval_item.title = "⏱️ Check Interval: Disabled"
+            # Stop the timer if it's running
+            self.stop_location_timer()
+            rumps.notification("MacMuteOnLocation", "Scan Mode Changed", "Only scanning on wakeup - interval scanning disabled", sound=False)
+        else:
+            self.wakeup_only_item.title = "⏰ Only Scan on Wakeup"
+            # Update interval menu to show current interval
+            self.update_interval_menu()
+            # Restart the timer if app is active
+            if self.is_active:
+                self.start_location_timer()
+            rumps.notification("MacMuteOnLocation", "Scan Mode Changed", "Regular interval scanning enabled", sound=False)
+        
+        # Save the setting
+        self.save_target_locations()
+    
     def start_location_timer(self):
         """Start the location checking timer"""
         self.stop_location_timer()
-        if self.is_active:
+        if self.is_active and not self.only_scan_on_wakeup:
             self.location_timer = threading.Timer(self.location_check_interval, self.location_timer_callback)
             self.location_timer.daemon = True
             self.location_timer.start()
@@ -417,8 +445,20 @@ class LocationMenubarApp(rumps.App):
                     self.update_status()
                     print(f"Loaded status: {'Active' if saved_status else 'Inactive'}")
                     
-                    # Start location timer if app was active
-                    if self.is_active:
+                    # Load wakeup-only setting
+                    saved_wakeup_only = data.get('settings', {}).get('only_scan_on_wakeup', False)
+                    self.only_scan_on_wakeup = saved_wakeup_only
+                    print(f"Loaded only_scan_on_wakeup: {saved_wakeup_only}")
+                    
+                    # Update wakeup-only menu item
+                    if self.only_scan_on_wakeup:
+                        self.wakeup_only_item.title = "✓ ⏰ Only Scan on Wakeup"
+                        self.interval_item.title = "⏱️ Check Interval: Disabled"
+                    else:
+                        self.wakeup_only_item.title = "⏰ Only Scan on Wakeup"
+                    
+                    # Start location timer if app was active and not in wakeup-only mode
+                    if self.is_active and not self.only_scan_on_wakeup:
                         self.start_location_timer()
                     
                 # Geocode all target locations on startup
@@ -438,12 +478,13 @@ class LocationMenubarApp(rumps.App):
                 'locations': self.target_locations,
                 'settings': {
                     'check_interval': self.location_check_interval,
-                    'is_active': self.is_active
+                    'is_active': self.is_active,
+                    'only_scan_on_wakeup': self.only_scan_on_wakeup
                 }
             }
             with open(locations_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            print(f"Saved locations and settings (interval: {self.location_check_interval}s)")
+            print(f"Saved locations and settings (interval: {self.location_check_interval}s, only_scan_on_wakeup: {self.only_scan_on_wakeup})")
         except Exception as e:
             print(f"Error saving target locations: {e}")
     
@@ -614,6 +655,18 @@ class LocationMenubarApp(rumps.App):
             # as rumps.MenuItem.clear() would normally handle this.
             # Adding items below will create/initialize self.interval_item._menu.
             self.interval_item._dict = {}
+        
+        # If only_scan_on_wakeup is enabled, show interval as disabled
+        if self.only_scan_on_wakeup:
+            self.interval_item.title = "⏱️ Check Interval: Disabled"
+            # Still add the menu items but indicate they're disabled
+            for label, secs in self.CHECK_INTERVALS.items():
+                menu_label = f"{label} (Disabled)"
+                # Add items but with a disabled callback
+                self.interval_item.add(rumps.MenuItem(menu_label, callback=lambda _: rumps.notification("MacMuteOnLocation", "Interval Disabled", "Disable 'Only Scan on Wakeup' to change interval", sound=False)))
+            return
+        
+        # Normal interval menu when only_scan_on_wakeup is disabled
         current_interval_label = "Unknown"
         for label, secs in self.CHECK_INTERVALS.items():
             if secs == self.location_check_interval:
