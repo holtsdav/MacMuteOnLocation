@@ -46,6 +46,7 @@ class LocationMenubarApp(rumps.App):
         self.launch_at_login = False
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.last_wake_time = time.time()
+        self.woke_from_sleep = False # Flag to indicate if the app just woke from sleep
         
         # Initialize location manager and delegate
         self.location_manager = None
@@ -754,6 +755,7 @@ Note: The app must be in your Applications folder for auto-start to work reliabl
         """Called when system wakes up"""
         print("System wake detected")
         self.last_wake_time = time.time()
+        self.woke_from_sleep = True # Set flag when system wakes
         
         if self.is_active:
             # Immediately check location after wake
@@ -877,15 +879,29 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
         
         self.app.inside_target_zone = currently_inside_any_target
 
-        # Enforce mute state based on current zone status
-        if self.app.inside_target_zone:
-            if not self.app.is_muted:
-                print("Inside target zone and Mac is not muted - Muting Mac.")
-                self.app.auto_mute(True)
+        if self.app.woke_from_sleep:
+            print("Processing location check after wake-up.")
+            if self.app.inside_target_zone:
+                if not self.app.is_muted:
+                    print("Inside target zone after wake and Mac is not muted - Muting Mac.")
+                    self.app.auto_mute(True)
+            # else: if outside target zone after wake, do nothing as per new requirement
+            #    print("Outside target zone after wake - no mute/unmute action taken.")
+            self.app.woke_from_sleep = False # Reset the flag
         else:
-            if self.app.is_muted:
-                print("Outside target zone and Mac is muted - Unmuting Mac.")
-                self.app.auto_mute(False)
+            # Regular interval check logic (original behavior)
+            if self.app.inside_target_zone:
+                if not self.app.is_muted:
+                    print("Inside target zone (interval check) and Mac is not muted - Muting Mac.")
+                    self.app.auto_mute(True)
+            else:
+                if self.app.is_muted:
+                    # Only unmute if it wasn't manually muted. 
+                    # For now, we assume auto_mute(False) handles this, or we might need more state
+                    # if manual mutes should persist even outside zones during interval checks.
+                    # The current request is specific to wake-up, so keeping interval unmuting as is.
+                    print("Outside target zone (interval check) and Mac is muted - Unmuting Mac.")
+                    self.app.auto_mute(False)
 
 
 def check_single_instance():
