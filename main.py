@@ -2,13 +2,21 @@
 
 import rumps
 import os
+import sys
 import json
 import math
-import threading
+import weakref
 import time
 import traceback
 import subprocess
+import plistlib
+import urllib.request
+import zipfile
+import tempfile
+import shutil
 from AppKit import NSApplication, NSWorkspace
+
+__version__ = "0.0.5"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -44,6 +52,7 @@ class LocationMenubarApp(rumps.App):
         self.location_check_interval = 300  # Default to 5 minutes for better battery life
         self.only_scan_on_wakeup = False  # New setting for wakeup-only scanning
         self.launch_at_login = False
+        self.has_prompted_autostart = False
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.last_wake_time = time.time()
         self.woke_from_sleep = False # Flag to indicate if the app just woke from sleep
@@ -59,7 +68,12 @@ class LocationMenubarApp(rumps.App):
         self.target_locations_menu = rumps.MenuItem("🎯 Target Locations")
         self.mute_item = rumps.MenuItem("🔇 Mute Mac", callback=self.manual_mute_toggle)
         self.interval_item = rumps.MenuItem("⏱️ Check Interval") # Title will be set in update_interval_menu
-        self.manual_setup_item = rumps.MenuItem("📖 Setup Auto-Start Instructions", callback=self.show_manual_setup_instructions)
+        
+        autostart_title = "🚀 Disable Auto-Start at Login" if self.is_in_login_items() else "🚀 Enable Auto-Start at Login"
+        self.autostart_item = rumps.MenuItem(autostart_title, callback=self.toggle_autostart)
+        
+        self.update_item = rumps.MenuItem("🔄 Check for Updates", callback=self.check_for_updates)
+        
         self.CHECK_INTERVALS = {
             "1 Min": 60,
             "2 Min": 120,
@@ -87,7 +101,9 @@ class LocationMenubarApp(rumps.App):
             self.mute_item,
             rumps.MenuItem("🔄 Refresh Location", callback=self.refresh_location),
             None,  # Separator
-            self.manual_setup_item,
+            self.update_item,
+            None,  # Separator
+            self.autostart_item,
             None,  # Separator
         ]
         
@@ -107,6 +123,9 @@ class LocationMenubarApp(rumps.App):
         
         # Setup wake detection
         self.setup_wake_detection()
+        
+        # Schedule first-time autostart prompt
+        rumps.Timer(self.prompt_autostart_if_needed, 2).start()
         
         # Template mode handles icon adaptation automatically
         print("Template mode enabled - icon adapts automatically to system appearance and wallpaper brightness")
@@ -237,16 +256,16 @@ class LocationMenubarApp(rumps.App):
         """Start the location checking timer"""
         self.stop_location_timer()
         if self.is_active and not self.only_scan_on_wakeup:
-            self.location_timer = threading.Timer(self.location_check_interval, self.location_timer_callback)
-            self.location_timer.daemon = True
+            self.location_timer = rumps.Timer(self.location_timer_callback, self.location_check_interval)
             self.location_timer.start()
     
     def stop_location_timer(self):
         """Stop the location checking timer"""
-        if hasattr(self, 'location_timer'):
-            self.location_timer.cancel()
+        if hasattr(self, 'location_timer') and self.location_timer:
+            self.location_timer.stop()
+            self.location_timer = None
     
-    def location_timer_callback(self):
+    def location_timer_callback(self, sender=None):
         """Timer callback for location checks"""
         print(f"Location timer callback. Active: {self.is_active}")
         if self.is_active and self.location_manager:
@@ -266,29 +285,25 @@ class LocationMenubarApp(rumps.App):
                 print(f"Error in location timer callback: {e}")
                 traceback.print_exc()
                 self.location_item.title = "📍 Location: Error"
-        
-        # Restart timer if still active
-        if self.is_active:
-            self.start_location_timer()
     
     def start_mute_sync_timer(self):
         """Start timer to sync mute state with system"""
         self.stop_mute_sync_timer()
         # Increase sync interval to 10 seconds for better performance
-        self.mute_sync_timer = threading.Timer(10.0, self.mute_sync_callback)
-        self.mute_sync_timer.daemon = True
+        self.mute_sync_timer = rumps.Timer(self.mute_sync_callback, 10.0)
         self.mute_sync_timer.start()
     
     def stop_mute_sync_timer(self):
         """Stop the mute sync timer"""
-        if hasattr(self, 'mute_sync_timer'):
-            self.mute_sync_timer.cancel()
+        if hasattr(self, 'mute_sync_timer') and self.mute_sync_timer:
+            self.mute_sync_timer.stop()
+            self.mute_sync_timer = None
     
-    def mute_sync_callback(self):
+    def mute_sync_callback(self, sender=None):
         """Sync internal mute state with system mute state"""
         try:
-            result = os.popen("osascript -e 'output muted of (get volume settings)'").read().strip()
-            system_muted = result.lower() == 'true'
+            result = subprocess.run(["osascript", "-e", "output muted of (get volume settings)"], capture_output=True, text=True)
+            system_muted = result.stdout.strip().lower() == 'true'
             
             if self.is_muted != system_muted:
                 self.is_muted = system_muted
@@ -299,9 +314,6 @@ class LocationMenubarApp(rumps.App):
                 
         except Exception as e:
             print(f"Error syncing mute state: {e}")
-        
-        # Restart timer
-        self.start_mute_sync_timer()
     
     def manual_mute_toggle(self, _):
         """Manually toggle mute state"""
@@ -315,20 +327,7 @@ class LocationMenubarApp(rumps.App):
         except Exception as e:
             print(f"Error in manual mute toggle: {e}")
     
-    def calculate_distance(self, lat1, lon1, lat2, lon2):
-        """Calculate distance between two coordinates using Haversine formula (in meters)"""
-        # Convert latitude and longitude from degrees to radians
-        lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-        
-        # Haversine formula
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-        c = 2 * math.asin(math.sqrt(a))
-        
-        # Radius of earth in meters
-        r = 6371000
-        return c * r
+    # calculate_distance removed in favor of CLLocation.distanceFromLocation_
     
     def geocode_target_location(self, address):
         """Geocode a target location address to get coordinates"""
@@ -385,6 +384,10 @@ class LocationMenubarApp(rumps.App):
             print(f"Error in auto_mute: {e}")
             traceback.print_exc()
     
+    def _delayed_stop_location_updates(self, sender):
+        self.stop_location_updates_and_reset_accuracy()
+        sender.stop()
+
     def refresh_location(self, _):
         """Manually refresh location"""
         print("Manual location refresh requested")
@@ -399,7 +402,8 @@ class LocationMenubarApp(rumps.App):
                 # Use startUpdatingLocation for better reliability
                 self.location_manager.startUpdatingLocation()
                 # Stop after getting location update
-                threading.Timer(10.0, self.stop_location_updates_and_reset_accuracy).start()
+                timer = rumps.Timer(self._delayed_stop_location_updates, 10.0)
+                timer.start()
             else:
                 self.enable_location_item.show()
                 self.update_location_authorization_ui(auth_status)
@@ -451,6 +455,8 @@ class LocationMenubarApp(rumps.App):
                     self.only_scan_on_wakeup = saved_wakeup_only
                     print(f"Loaded only_scan_on_wakeup: {saved_wakeup_only}")
                     
+                    self.has_prompted_autostart = data.get('settings', {}).get('has_prompted_autostart', False)
+                    
                     # Update wakeup-only menu item
                     if self.only_scan_on_wakeup:
                         self.wakeup_only_item.title = "✓ ⏰ Only Scan on Wakeup"
@@ -480,7 +486,8 @@ class LocationMenubarApp(rumps.App):
                 'settings': {
                     'check_interval': self.location_check_interval,
                     'is_active': self.is_active,
-                    'only_scan_on_wakeup': self.only_scan_on_wakeup
+                    'only_scan_on_wakeup': self.only_scan_on_wakeup,
+                    'has_prompted_autostart': self.has_prompted_autostart
                 }
             }
             with open(locations_file, 'w') as f:
@@ -698,32 +705,165 @@ class LocationMenubarApp(rumps.App):
     # def set_interval(self, _): # This is the old method, now replaced by menu actions
     #     ...
 
-    def show_manual_setup_instructions(self, _):
-        """Show instructions for manually setting up auto-start"""
-        instructions = """To make MacMuteOnLocation start automatically when you log in:
+    def prompt_autostart_if_needed(self, sender=None):
+        if sender:
+            sender.stop()
+            
+        if not self.has_prompted_autostart:
+            self.has_prompted_autostart = True
+            self.save_target_locations()
+            
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            response = rumps.alert(
+                title='MacMuteOnLocation',
+                message='Would you like to start MacMuteOnLocation automatically when you log in?\n\nYou can always change this later from the menu bar.',
+                ok='Yes',
+                cancel='No'
+            )
+            
+            if response == 1:
+                if not self.is_in_login_items():
+                    self.toggle_autostart(self.autostart_item)
 
-🔧 OPTION 1: System Settings (Recommended)
-1. Open System Settings (or System Preferences on older macOS)
-2. Go to General → Login Items
-3. Click the '+' button under "Open at Login"
-4. Navigate to and select MacMuteOnLocation.app
-5. The app will now start automatically when you log in
-
-🔧 OPTION 2: Finder Method
-1. Open Finder and navigate to Applications
-2. Find MacMuteOnLocation.app
-3. Right-click and select "Make Alias"
-4. Move the alias to: ~/Library/LaunchAgents/
-5. Rename it to: com.macmuteonlocation.app.plist
-
-✅ To verify it's working:
-• Check System Settings → General → Login Items
-• MacMuteOnLocation should appear in the list
-• Test by logging out and back in
-
-Note: The app must be in your Applications folder for auto-start to work reliably."""
+    def check_for_updates(self, _):
+        """Check GitHub for updates, and if found, download and replace"""
+        self.update_item.title = "🔄 Checking..."
         
-        rumps.alert("Setup Auto-Start Instructions", instructions)
+        try:
+            req = urllib.request.Request("https://api.github.com/repos/holtsdav/MacMuteOnLocation/releases/latest")
+            req.add_header('User-Agent', 'MacMuteOnLocation-Updater')
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+            latest_version = data.get('tag_name', '').lstrip('v')
+            
+            if not latest_version:
+                raise Exception("Could not determine latest version")
+                
+            if latest_version <= __version__:
+                rumps.alert("Up to date", f"You are running the latest version ({__version__}).")
+                self.update_item.title = "🔄 Check for Updates"
+                return
+                
+            if '.app/Contents/MacOS' not in sys.executable:
+                rumps.alert(
+                    "Update Available", 
+                    f"Version {latest_version} is available, but you are running from source. Please update manually via git pull."
+                )
+                self.update_item.title = "🔄 Check for Updates"
+                return
+                
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            response = rumps.alert(
+                title='Update Available',
+                message=f'Version {latest_version} is available (Current: {__version__}).\nWould you like to install it now? The app will restart.',
+                ok='Update Now',
+                cancel='Later'
+            )
+            
+            if response == 1:
+                self._perform_update(data)
+            else:
+                self.update_item.title = "🔄 Check for Updates"
+                
+        except Exception as e:
+            rumps.alert("Update Failed", f"Failed to check for updates: {e}")
+            self.update_item.title = "🔄 Check for Updates"
+            traceback.print_exc()
+            
+    def _perform_update(self, release_data):
+        self.update_item.title = "🔄 Downloading..."
+        
+        assets = release_data.get('assets', [])
+        zip_url = None
+        for asset in assets:
+            if asset.get('name', '').endswith('.zip'):
+                zip_url = asset.get('browser_download_url')
+                break
+                
+        if not zip_url:
+            rumps.alert("Error", "No pre-built app zip found in the release.")
+            self.update_item.title = "🔄 Check for Updates"
+            return
+            
+        try:
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, "update.zip")
+            urllib.request.urlretrieve(zip_url, zip_path)
+            
+            self.update_item.title = "🔄 Extracting..."
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+                
+            extracted_app = os.path.join(temp_dir, "MacMuteOnLocation.app")
+            if not os.path.exists(extracted_app):
+                for root, dirs, files in os.walk(temp_dir):
+                    if "MacMuteOnLocation.app" in dirs:
+                        extracted_app = os.path.join(root, "MacMuteOnLocation.app")
+                        break
+                        
+            if not os.path.exists(extracted_app):
+                raise Exception("Could not find MacMuteOnLocation.app in the downloaded archive.")
+                
+            current_app_path = sys.executable.split('.app/Contents/MacOS')[0] + '.app'
+            script_path = os.path.join(temp_dir, "update.sh")
+            
+            script_content = f'''#!/bin/bash
+sleep 2
+rm -rf "{current_app_path}"
+mv "{extracted_app}" "{current_app_path}"
+open "{current_app_path}"
+rm -rf "{temp_dir}"
+'''
+            with open(script_path, 'w') as f:
+                f.write(script_content)
+                
+            os.chmod(script_path, 0o755)
+            subprocess.Popen([script_path], start_new_session=True)
+            rumps.quit_application()
+            
+        except Exception as e:
+            rumps.alert("Error", f"Failed to install update: {e}")
+            self.update_item.title = "🔄 Check for Updates"
+            traceback.print_exc()
+
+    def is_in_login_items(self):
+        """Check if the app is in the user's login items"""
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to get name of every login item'],
+                capture_output=True, text=True
+            )
+            return "MacMuteOnLocation" in result.stdout
+        except Exception:
+            return False
+
+    def toggle_autostart(self, sender):
+        """Toggle auto-start at login by adding/removing from System Events Login Items"""
+        if '.app/Contents/MacOS' not in sys.executable:
+            rumps.alert("Not Supported", "Auto-start via Login Items only works when running the compiled App bundle. Please run build_app.sh and use the generated MacMuteOnLocation.app.")
+            return
+            
+        app_path = sys.executable.split('.app/Contents/MacOS')[0] + '.app'
+        
+        if self.is_in_login_items():
+            # Remove it
+            script = 'tell application "System Events" to delete (every login item whose name is "MacMuteOnLocation")'
+            try:
+                subprocess.run(["osascript", "-e", script], check=True)
+                sender.title = "🚀 Enable Auto-Start at Login"
+                rumps.notification("Auto-Start Disabled", "", "Removed from Login Items.")
+            except Exception as e:
+                rumps.alert("Error", f"Failed to disable auto-start: {e}")
+        else:
+            # Add it
+            script = f'tell application "System Events" to make login item at end with properties {{path:"{app_path}", hidden:false}}'
+            try:
+                subprocess.run(["osascript", "-e", script], check=True)
+                sender.title = "🚀 Disable Auto-Start at Login"
+                rumps.notification("Auto-Start Enabled", "", "Added to Login Items.")
+            except Exception as e:
+                rumps.alert("Error", f"Failed to enable auto-start: {e}")
 
     def setup_wake_detection(self):
         """Setup system wake detection using NSWorkspace notifications"""
@@ -799,7 +939,7 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
         """Initialize with the main app instance"""
         self = objc.super(LocationDelegate, self).init()
         if self is not None:
-            self.app = app
+            self.app = weakref.ref(app)
         return self
 
     def locationManager_didUpdateLocations_(self, manager, locations):
@@ -809,7 +949,9 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
             location = locations[-1]
             try:
                 # Call the app's location_updated method
-                self.app.location_updated(location)
+                app = self.app()
+                if app:
+                    app.location_updated(location)
             except Exception as e:
                 print(f"Error in location callback: {e}")
                 traceback.print_exc()
@@ -822,8 +964,9 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
         print(f"Location error details - Code: {error_code}, Description: {error_description}")
         
         # Update UI to show error
-        if hasattr(self.app, 'location_item'):
-            self.app.location_item.title = "📍 Location: Error"
+        app = self.app()
+        if app and hasattr(app, 'location_item'):
+            app.location_item.title = "📍 Location: Error"
         
         # Stop location updates on error
         manager.stopUpdatingLocation()
@@ -844,28 +987,38 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
         
         print(f"Location authorization status changed to: {status_string}")
         # Update UI based on new status
-        if hasattr(self.app, 'update_location_authorization_ui'):
-            self.app.update_location_authorization_ui(status)
+        app = self.app()
+        if app and hasattr(app, 'update_location_authorization_ui'):
+            app.update_location_authorization_ui(status)
 
     def check_target_locations(self, current_lat, current_lon):
         """Check if current location is within radius of any target location"""
-        print(f"Checking target locations - Active: {self.app.is_active}, Target count: {len(self.app.target_locations)}")
-        if not self.app.is_active:
+        app = self.app()
+        if not app:
+            return
+            
+        print(f"Checking target locations - Active: {app.is_active}, Target count: {len(app.target_locations)}")
+        if not app.is_active:
             print("App is inactive, skipping location check for mute logic")
             return
-        if not self.app.target_locations:
+        if not app.target_locations:
             print("No target locations configured, skipping mute logic")
             return
             
         currently_inside_any_target = False
         
-        for target in self.app.target_locations:
+        # Create CLLocation for current position
+        from CoreLocation import CLLocation
+        current_loc = CLLocation.alloc().initWithLatitude_longitude_(current_lat, current_lon)
+        
+        for target in app.target_locations:
             address = target['address']
             radius = target['radius']
             
-            if address in self.app.target_location_coords:
-                target_lat, target_lon = self.app.target_location_coords[address]
-                distance = self.app.calculate_distance(current_lat, current_lon, target_lat, target_lon)
+            if address in app.target_location_coords:
+                target_lat, target_lon = app.target_location_coords[address]
+                target_loc = CLLocation.alloc().initWithLatitude_longitude_(target_lat, target_lon)
+                distance = current_loc.distanceFromLocation_(target_loc)
                 
                 print(f"Distance to {address}: {distance:.0f}m (radius: {radius}m)")
                 
@@ -875,33 +1028,33 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
                     break 
             else:
                 print(f"Coordinates for {address} not yet geocoded. Requesting geocode.")
-                self.app.geocode_target_location(address)
+                app.geocode_target_location(address)
         
-        self.app.inside_target_zone = currently_inside_any_target
+        app.inside_target_zone = currently_inside_any_target
 
-        if self.app.woke_from_sleep:
+        if app.woke_from_sleep:
             print("Processing location check after wake-up.")
-            if self.app.inside_target_zone:
-                if not self.app.is_muted:
+            if app.inside_target_zone:
+                if not app.is_muted:
                     print("Inside target zone after wake and Mac is not muted - Muting Mac.")
-                    self.app.auto_mute(True)
+                    app.auto_mute(True)
             # else: if outside target zone after wake, do nothing as per new requirement
             #    print("Outside target zone after wake - no mute/unmute action taken.")
-            self.app.woke_from_sleep = False # Reset the flag
+            app.woke_from_sleep = False # Reset the flag
         else:
             # Regular interval check logic (original behavior)
-            if self.app.inside_target_zone:
-                if not self.app.is_muted:
+            if app.inside_target_zone:
+                if not app.is_muted:
                     print("Inside target zone (interval check) and Mac is not muted - Muting Mac.")
-                    self.app.auto_mute(True)
+                    app.auto_mute(True)
             else:
-                if self.app.is_muted:
+                if app.is_muted:
                     # Only unmute if it wasn't manually muted. 
                     # For now, we assume auto_mute(False) handles this, or we might need more state
                     # if manual mutes should persist even outside zones during interval checks.
                     # The current request is specific to wake-up, so keeping interval unmuting as is.
                     print("Outside target zone (interval check) and Mac is muted - Unmuting Mac.")
-                    self.app.auto_mute(False)
+                    app.auto_mute(False)
 
 
 def check_single_instance():
