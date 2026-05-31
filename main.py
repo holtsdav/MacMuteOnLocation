@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,

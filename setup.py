@@ -11,8 +11,8 @@ OPTIONS = {
         'CFBundleName': 'MacMuteOnLocation',
         'CFBundleDisplayName': 'MacMuteOnLocation',
         'CFBundleIdentifier': 'com.macmuteonlocation.app',
-        'CFBundleVersion': '0.0.5',
-        'CFBundleShortVersionString': '0.0.5',
+        'CFBundleVersion': '0.0.6',
+        'CFBundleShortVersionString': '0.0.6',
         'CFBundleIconFile': 'app_icon.icns',  # Specify icon in plist
         'LSUIElement': True,  # Hide from dock
         'NSLocationUsageDescription': 'This app needs location access to automatically mute/unmute based on your location.',
@@ -30,7 +30,7 @@ setup(
     options={'py2app': OPTIONS},
     setup_requires=['py2app'],
     name='MacMuteOnLocation',
-    version='0.0.5',
+    version='0.0.6',
     description='Automatically mute/unmute Mac based on location',
     author='Your Name',
     author_email='your.email@example.com',
