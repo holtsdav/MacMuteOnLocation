@@ -5,9 +5,6 @@ on:
     tags:
       - 'v*' # Trigger only on tags starting with v (e.g. v1.0.0)
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: macos-latest
@@ -38,9 +35,39 @@ jobs:
         cd dist
         zip -r MacMuteOnLocation.zip MacMuteOnLocation.app
         
+    - name: Generate Release Notes
+      id: notes
+      run: |
+        MSG=$(git log -1 --pretty=%B)
+        echo "commit_msg<<EOF" >> $GITHUB_OUTPUT
+        echo "$MSG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         files: dist/MacMuteOnLocation.zip
+        body: |
+          ### Patchnotes
+          ${{ steps.notes.outputs.commit_msg }}
+          
+          ### Important Install Instructions
+          Apple will say the App is "Damaged" if you don't follow Step 3.
+          
+          1. Unzip the File
+          2. Move the `.app` file to your **Applications** folder
+          3. Paste this exact command into your Terminal (Required since this app is not signed with an Apple Developer Account):
+             ```bash
+             sudo xattr -rd com.apple.quarantine /Applications/MacMuteOnLocation.app
+             ```
+          4. Enjoy!
+          
+          ---
+          
+          **Disclaimer:**
+          - Bugs expected
+          - Basic functionality works
+          - Only tested on M-Series Macs
+          - Use at own risk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
