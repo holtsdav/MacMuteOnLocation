@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.0.9"
+__version__ = "0.0.10"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -62,17 +62,17 @@ class LocationMenubarApp(rumps.App):
         self.location_delegate_obj = None
         
         # Create menu items with better UX
-        self.status_item = rumps.MenuItem("🔴 Status: Inactive", callback=self.toggle_status)
-        self.location_item = rumps.MenuItem("📍 Location: Unknown")
-        self.enable_location_item = rumps.MenuItem("⚙️ Enable Location Services in System Settings", callback=self.open_location_settings)
-        self.target_locations_menu = rumps.MenuItem("🎯 Target Locations")
-        self.mute_item = rumps.MenuItem("🔇 Mute Mac", callback=self.manual_mute_toggle)
-        self.interval_item = rumps.MenuItem("⏱️ Check Interval") # Title will be set in update_interval_menu
+        self.status_item = rumps.MenuItem("Status: Inactive", icon=os.path.join(self.script_dir, "icons", "status_inactive.png"), template=True, callback=self.toggle_status)
+        self.location_item = rumps.MenuItem("Location: Unknown", icon=os.path.join(self.script_dir, "icons", "location.png"), template=True)
+        self.enable_location_item = rumps.MenuItem("Enable Location Services in System Settings", icon=os.path.join(self.script_dir, "icons", "settings.png"), template=True, callback=self.open_location_settings)
+        self.target_locations_menu = rumps.MenuItem("Target Locations", icon=os.path.join(self.script_dir, "icons", "target.png"), template=True)
+        self.mute_item = rumps.MenuItem("Mute Mac", icon=os.path.join(self.script_dir, "icons", "mute.png"), template=True, callback=self.manual_mute_toggle)
+        self.interval_item = rumps.MenuItem("Check Interval", icon=os.path.join(self.script_dir, "icons", "interval.png"), template=True) # Title will be set in update_interval_menu
         
-        autostart_title = "🚀 Disable Auto-Start at Login" if self.is_in_login_items() else "🚀 Enable Auto-Start at Login"
-        self.autostart_item = rumps.MenuItem(autostart_title, callback=self.toggle_autostart)
+        autostart_title = "Disable Auto-Start at Login" if self.is_in_login_items() else "Enable Auto-Start at Login"
+        self.autostart_item = rumps.MenuItem(autostart_title, icon=os.path.join(self.script_dir, "icons", "autostart.png"), template=True, callback=self.toggle_autostart)
         
-        self.update_item = rumps.MenuItem("🔄 Check for Updates", callback=self.check_for_updates)
+        self.update_item = rumps.MenuItem("Check for Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.check_for_updates)
         
         self.CHECK_INTERVALS = {
             "1 Min": 60,
@@ -86,7 +86,7 @@ class LocationMenubarApp(rumps.App):
         self.update_interval_menu()
         
         # Create the wakeup-only toggle menu item
-        self.wakeup_only_item = rumps.MenuItem("⏰ Only Scan on Wakeup", callback=self.toggle_wakeup_only)
+        self.wakeup_only_item = rumps.MenuItem("Only Scan on Wakeup", icon=os.path.join(self.script_dir, "icons", "wakeup.png"), template=True, callback=self.toggle_wakeup_only)
         
         # Build menu structure with better organization
         self.menu = [
@@ -99,7 +99,7 @@ class LocationMenubarApp(rumps.App):
             self.wakeup_only_item, # New toggle for wakeup-only scanning
             None,  # Separator
             self.mute_item,
-            rumps.MenuItem("🔄 Refresh Location", callback=self.refresh_location),
+            rumps.MenuItem("Refresh Location", icon=os.path.join(self.script_dir, "icons", "refresh.png"), template=True, callback=self.refresh_location),
             None,  # Separator
             self.update_item,
             None,  # Separator
@@ -178,7 +178,7 @@ class LocationMenubarApp(rumps.App):
             else:
                 print(f"Location access denied or restricted: {auth_status}")
                 self.enable_location_item.show()
-                self.location_item.title = "📍 Location: Access Denied"
+                self.location_item.title = "Location: Access Denied"
                 
         except Exception as e:
             print(f"Error setting up location manager: {e}")
@@ -205,7 +205,25 @@ class LocationMenubarApp(rumps.App):
             lon = location.coordinate().longitude
             
             print(f"Location updated: {lat}, {lon}")
-            self.location_item.title = f"📍 Location: {lat:.4f}, {lon:.4f}"
+            
+            # Reverse geocode to get street name
+            def reverse_geocode_callback(placemarks, error):
+                try:
+                    if error is None and placemarks and len(placemarks) > 0:
+                        placemark = placemarks[0]
+                        street = placemark.thoroughfare()
+                        if not street:
+                            street = placemark.name()
+                        
+                        if street:
+                            self.location_item.title = f"Location: {street}"
+                        else:
+                            self.location_item.title = f"Location: {lat:.4f}, {lon:.4f}"
+                except Exception as e:
+                    print(f"Error in reverse geocode callback: {e}")
+
+            geocoder = CLGeocoder.alloc().init()
+            geocoder.reverseGeocodeLocation_completionHandler_(location, reverse_geocode_callback)
             
             # Check if we're in any target zones
             if hasattr(self.location_delegate_obj, 'check_target_locations'):
@@ -214,7 +232,7 @@ class LocationMenubarApp(rumps.App):
         except Exception as e:
             print(f"Error processing location update: {e}")
             traceback.print_exc()
-            self.location_item.title = "📍 Location: Error"
+            self.location_item.title = "Location: Error"
     
     def stop_location_updates(self):
         """Stop location updates"""
@@ -235,13 +253,13 @@ class LocationMenubarApp(rumps.App):
         
         # Update menu item to show current state
         if self.only_scan_on_wakeup:
-            self.wakeup_only_item.title = "✓ ⏰ Only Scan on Wakeup"
-            self.interval_item.title = "⏱️ Check Interval: Disabled"
+            self.wakeup_only_item.title = "✓ Only Scan on Wakeup"
+            self.update_interval_menu()
             # Stop the timer if it's running
             self.stop_location_timer()
             rumps.notification("MacMuteOnLocation", "Scan Mode Changed", "Only scanning on wakeup - interval scanning disabled", sound=False)
         else:
-            self.wakeup_only_item.title = "⏰ Only Scan on Wakeup"
+            self.wakeup_only_item.title = "Only Scan on Wakeup"
             # Update interval menu to show current interval
             self.update_interval_menu()
             # Restart the timer if app is active
@@ -274,17 +292,17 @@ class LocationMenubarApp(rumps.App):
                 if auth_status in [kCLAuthorizationStatusAuthorizedAlways, kCLAuthorizationStatusAuthorizedWhenInUse]:
                     print("Timer: Requesting location update...")
                     # Update UI to show we're checking location
-                    self.location_item.title = "📍 Location: Updating..."
+                    self.location_item.title = "Location: Updating..."
                     # Request single location update for better battery efficiency
                     self.location_manager.requestLocation()
                 else:
                     print("Timer: Location not authorized for timer callback")
-                    self.location_item.title = "📍 Location: Access Denied"
+                    self.location_item.title = "Location: Access Denied"
                     self.update_location_authorization_ui(auth_status)
             except Exception as e:
                 print(f"Error in location timer callback: {e}")
                 traceback.print_exc()
-                self.location_item.title = "📍 Location: Error"
+                self.location_item.title = "Location: Error"
     
     def start_mute_sync_timer(self):
         """Start timer to sync mute state with system"""
@@ -308,9 +326,11 @@ class LocationMenubarApp(rumps.App):
             if self.is_muted != system_muted:
                 self.is_muted = system_muted
                 if self.is_muted:
-                    self.mute_item.title = "🔊 Unmute Mac"
+                    self.mute_item.title = "Unmute Mac"
+                    self.mute_item.icon = os.path.join(self.script_dir, "icons", "unmute.png")
                 else:
-                    self.mute_item.title = "🔇 Mute Mac"
+                    self.mute_item.title = "Mute Mac"
+                    self.mute_item.icon = os.path.join(self.script_dir, "icons", "mute.png")
                 
         except Exception as e:
             print(f"Error syncing mute state: {e}")
@@ -321,9 +341,15 @@ class LocationMenubarApp(rumps.App):
             if self.is_muted:
                 os.system("osascript -e 'set volume without output muted'")
                 print("Manual unmute")
+                self.is_muted = False
+                self.mute_item.title = "Mute Mac"
+                self.mute_item.icon = os.path.join(self.script_dir, "icons", "mute.png")
             else:
                 os.system("osascript -e 'set volume with output muted'")
                 print("Manual mute")
+                self.is_muted = True
+                self.mute_item.title = "Unmute Mac"
+                self.mute_item.icon = os.path.join(self.script_dir, "icons", "unmute.png")
         except Exception as e:
             print(f"Error in manual mute toggle: {e}")
     
@@ -376,9 +402,11 @@ class LocationMenubarApp(rumps.App):
                 self.is_muted = should_mute
                 # Update the mute button text to reflect the new state
                 if self.is_muted:
-                    self.mute_item.title = "🔊 Unmute Mac"
+                    self.mute_item.title = "Unmute Mac"
+                    self.mute_item.icon = os.path.join(self.script_dir, "icons", "unmute.png")
                 else:
-                    self.mute_item.title = "🔇 Mute Mac"
+                    self.mute_item.title = "Mute Mac"
+                    self.mute_item.icon = os.path.join(self.script_dir, "icons", "mute.png")
                 
         except Exception as e:
             print(f"Error in auto_mute: {e}")
@@ -392,7 +420,7 @@ class LocationMenubarApp(rumps.App):
         """Manually refresh location"""
         print("Manual location refresh requested")
         
-        self.location_item.title = "📍 Location: Refreshing..."
+        self.location_item.title = "Location: Refreshing..."
         try:
             auth_status = CLLocationManager.authorizationStatus()
             if self.location_manager and auth_status in [kCLAuthorizationStatusAuthorizedAlways, kCLAuthorizationStatusAuthorizedWhenInUse]:
@@ -407,12 +435,12 @@ class LocationMenubarApp(rumps.App):
             else:
                 self.enable_location_item.show()
                 self.update_location_authorization_ui(auth_status)
-                self.location_item.title = "📍 Location: Access Denied"
+                self.location_item.title = "Location: Access Denied"
                 rumps.alert("Location Access Required", f"Please enable location services to refresh location. Authorization status: {auth_status}")
         except Exception as e:
             print(f"Error refreshing location: {e}")
             traceback.print_exc()
-            self.location_item.title = "📍 Location: Error"
+            self.location_item.title = "Location: Error"
     
     def update_status(self, active=None):
         """Update the status menu item to show Active or Inactive"""
@@ -421,9 +449,11 @@ class LocationMenubarApp(rumps.App):
             
         # Update menu item text based on status with visual indicators
         if self.is_active:
-            self.status_item.title = "🟢 Status: Active"
+            self.status_item.title = "Status: Active"
+            self.status_item.icon = os.path.join(self.script_dir, "icons", "status_active.png")
         else:
-            self.status_item.title = "🔴 Status: Inactive"
+            self.status_item.title = "Status: Inactive"
+            self.status_item.icon = os.path.join(self.script_dir, "icons", "status_inactive.png")
 
     def load_target_locations(self):
         """Load target locations and settings from JSON file"""
@@ -459,10 +489,10 @@ class LocationMenubarApp(rumps.App):
                     
                     # Update wakeup-only menu item
                     if self.only_scan_on_wakeup:
-                        self.wakeup_only_item.title = "✓ ⏰ Only Scan on Wakeup"
-                        self.interval_item.title = "⏱️ Check Interval: Disabled"
+                        self.wakeup_only_item.title = "✓ Only Scan on Wakeup"
+                        self.interval_item.title = "Check Interval: Disabled"
                     else:
-                        self.wakeup_only_item.title = "⏰ Only Scan on Wakeup"
+                        self.wakeup_only_item.title = "Only Scan on Wakeup"
                     
                     # Start location timer if app was active and not in wakeup-only mode
                     if self.is_active and not self.only_scan_on_wakeup:
@@ -666,7 +696,7 @@ class LocationMenubarApp(rumps.App):
         
         # If only_scan_on_wakeup is enabled, show interval as disabled
         if self.only_scan_on_wakeup:
-            self.interval_item.title = "⏱️ Check Interval: Disabled"
+            self.interval_item.title = "Check Interval: Disabled"
             # Still add the menu items but indicate they're disabled
             for label, secs in self.CHECK_INTERVALS.items():
                 menu_label = f"{label} (Disabled)"
@@ -684,7 +714,7 @@ class LocationMenubarApp(rumps.App):
             else:
                 menu_label = label
             self.interval_item.add(rumps.MenuItem(menu_label, callback=lambda _, l=label, s=secs: self.set_interval_action(l, s)))
-        self.interval_item.title = f"⏱️ Check Interval: {current_interval_label}"
+        self.interval_item.title = f"Check Interval: {current_interval_label}"
 
     def set_interval_action(self, label, seconds):
         """Action called when an interval is selected from the menu."""
@@ -727,7 +757,7 @@ class LocationMenubarApp(rumps.App):
 
     def check_for_updates(self, _):
         """Check GitHub for updates, and if found, download and replace"""
-        self.update_item.title = "🔄 Checking..."
+        self.update_item.title = "Checking..."
         
         try:
             req = urllib.request.Request("https://api.github.com/repos/holtsdav/MacMuteOnLocation/releases/latest")
@@ -742,7 +772,7 @@ class LocationMenubarApp(rumps.App):
                 
             if latest_version <= __version__:
                 rumps.alert("Up to date", f"You are running the latest version ({__version__}).")
-                self.update_item.title = "🔄 Check for Updates"
+                self.update_item.title = "Check for Updates"
                 return
                 
             if '.app/Contents/MacOS' not in sys.executable:
@@ -750,7 +780,7 @@ class LocationMenubarApp(rumps.App):
                     "Update Available", 
                     f"Version {latest_version} is available, but you are running from source. Please update manually via git pull."
                 )
-                self.update_item.title = "🔄 Check for Updates"
+                self.update_item.title = "Check for Updates"
                 return
                 
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -764,15 +794,15 @@ class LocationMenubarApp(rumps.App):
             if response == 1:
                 self._perform_update(data)
             else:
-                self.update_item.title = "🔄 Check for Updates"
+                self.update_item.title = "Check for Updates"
                 
         except Exception as e:
             rumps.alert("Update Failed", f"Failed to check for updates: {e}")
-            self.update_item.title = "🔄 Check for Updates"
+            self.update_item.title = "Check for Updates"
             traceback.print_exc()
             
     def _perform_update(self, release_data):
-        self.update_item.title = "🔄 Downloading..."
+        self.update_item.title = "Downloading..."
         
         assets = release_data.get('assets', [])
         zip_url = None
@@ -783,7 +813,7 @@ class LocationMenubarApp(rumps.App):
                 
         if not zip_url:
             rumps.alert("Error", "No pre-built app zip found in the release.")
-            self.update_item.title = "🔄 Check for Updates"
+            self.update_item.title = "Check for Updates"
             return
             
         try:
@@ -791,7 +821,7 @@ class LocationMenubarApp(rumps.App):
             zip_path = os.path.join(temp_dir, "update.zip")
             urllib.request.urlretrieve(zip_url, zip_path)
             
-            self.update_item.title = "🔄 Extracting..."
+            self.update_item.title = "Extracting..."
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
                 
@@ -824,7 +854,7 @@ rm -rf "{temp_dir}"
             
         except Exception as e:
             rumps.alert("Error", f"Failed to install update: {e}")
-            self.update_item.title = "🔄 Check for Updates"
+            self.update_item.title = "Check for Updates"
             traceback.print_exc()
 
     def is_in_login_items(self):
@@ -851,7 +881,7 @@ rm -rf "{temp_dir}"
             script = 'tell application "System Events" to delete (every login item whose name is "MacMuteOnLocation")'
             try:
                 subprocess.run(["osascript", "-e", script], check=True)
-                sender.title = "🚀 Enable Auto-Start at Login"
+                sender.title = "Enable Auto-Start at Login"
                 rumps.notification("Auto-Start Disabled", "", "Removed from Login Items.")
             except Exception as e:
                 rumps.alert("Error", f"Failed to disable auto-start: {e}")
@@ -860,7 +890,7 @@ rm -rf "{temp_dir}"
             script = f'tell application "System Events" to make login item at end with properties {{path:"{app_path}", hidden:false}}'
             try:
                 subprocess.run(["osascript", "-e", script], check=True)
-                sender.title = "🚀 Disable Auto-Start at Login"
+                sender.title = "Disable Auto-Start at Login"
                 rumps.notification("Auto-Start Enabled", "", "Added to Login Items.")
             except Exception as e:
                 rumps.alert("Error", f"Failed to enable auto-start: {e}")
@@ -900,7 +930,7 @@ rm -rf "{temp_dir}"
         if self.is_active:
             # Immediately check location after wake
             print("Requesting immediate location update after wake")
-            self.location_item.title = "📍 Location: Checking after wake..."
+            self.location_item.title = "Location: Checking after wake..."
             
             # Request immediate location update
             if self.location_manager:
@@ -966,7 +996,7 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
         # Update UI to show error
         app = self.app()
         if app and hasattr(app, 'location_item'):
-            app.location_item.title = "📍 Location: Error"
+            app.location_item.title = "Location: Error"
         
         # Stop location updates on error
         manager.stopUpdatingLocation()

@@ -1,4 +1,10 @@
+import re
 from setuptools import setup
+
+# Extract version from main.py
+with open('main.py', 'r') as f:
+    match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE)
+    version = match.group(1) if match else '0.0.1'
 
 APP = ['main.py']
 DATA_FILES = [('', ['location_dark.png'])]
@@ -11,8 +17,8 @@ OPTIONS = {
         'CFBundleName': 'MacMuteOnLocation',
         'CFBundleDisplayName': 'MacMuteOnLocation',
         'CFBundleIdentifier': 'com.macmuteonlocation.app',
-        'CFBundleVersion': '0.0.9',
-        'CFBundleShortVersionString': '0.0.9',
+        'CFBundleVersion': version,
+        'CFBundleShortVersionString': version,
         'CFBundleIconFile': 'app_icon.icns',  # Specify icon in plist
         'LSUIElement': True,  # Hide from dock
         'NSLocationUsageDescription': 'This app needs location access to automatically mute/unmute based on your location.',
@@ -30,7 +36,7 @@ setup(
     options={'py2app': OPTIONS},
     setup_requires=['py2app'],
     name='MacMuteOnLocation',
-    version='0.0.9',
+    version=version,
     description='Automatically mute/unmute Mac based on location',
     author='Your Name',
     author_email='your.email@example.com',
