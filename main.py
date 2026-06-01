@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.1"
+__version__ = "0.1.0"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -74,9 +74,6 @@ class LocationMenubarApp(rumps.App):
         
         self.update_item = rumps.MenuItem("Check for Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.check_for_updates)
         
-        self.auto_update_check = True
-        self.auto_update_item = rumps.MenuItem("✓ Auto Check for Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.toggle_auto_update_check)
-        
         self.CHECK_INTERVALS = {
             "1 Min": 60,
             "2 Min": 120,
@@ -105,7 +102,6 @@ class LocationMenubarApp(rumps.App):
             rumps.MenuItem("Refresh Location", icon=os.path.join(self.script_dir, "icons", "refresh.png"), template=True, callback=self.refresh_location),
             None,  # Separator
             self.update_item,
-            self.auto_update_item,
             None,  # Separator
             self.autostart_item,
             None,  # Separator
@@ -130,9 +126,6 @@ class LocationMenubarApp(rumps.App):
         
         # Schedule first-time autostart prompt
         rumps.Timer(self.prompt_autostart_if_needed, 2).start()
-        
-        # Schedule auto update check
-        rumps.Timer(self.initial_update_check, 5).start()
         
         # Template mode handles icon adaptation automatically
         print("Template mode enabled - icon adapts automatically to system appearance and wallpaper brightness")
@@ -494,9 +487,6 @@ class LocationMenubarApp(rumps.App):
                     
                     self.has_prompted_autostart = data.get('settings', {}).get('has_prompted_autostart', False)
                     
-                    self.auto_update_check = data.get('settings', {}).get('auto_update_check', True)
-                    self.update_auto_update_menu()
-                    
                     # Update wakeup-only menu item
                     if self.only_scan_on_wakeup:
                         self.wakeup_only_item.title = "✓ Only Scan on Wakeup"
@@ -527,8 +517,7 @@ class LocationMenubarApp(rumps.App):
                     'check_interval': self.location_check_interval,
                     'is_active': self.is_active,
                     'only_scan_on_wakeup': self.only_scan_on_wakeup,
-                    'has_prompted_autostart': self.has_prompted_autostart,
-                    'auto_update_check': self.auto_update_check
+                    'has_prompted_autostart': self.has_prompted_autostart
                 }
             }
             with open(locations_file, 'w') as f:
@@ -766,29 +755,9 @@ class LocationMenubarApp(rumps.App):
                 if not self.is_in_login_items():
                     self.toggle_autostart(self.autostart_item)
 
-    def initial_update_check(self, sender=None):
-        if sender:
-            sender.stop()
-        if self.auto_update_check:
-            print("Running silent auto update check...")
-            self.check_for_updates(silent=True)
-
-    def toggle_auto_update_check(self, _):
-        """Toggle auto update check"""
-        self.auto_update_check = not self.auto_update_check
-        self.update_auto_update_menu()
-        self.save_target_locations()
-
-    def update_auto_update_menu(self):
-        if self.auto_update_check:
-            self.auto_update_item.title = "✓ Auto Check for Updates"
-        else:
-            self.auto_update_item.title = "Auto Check for Updates"
-
-    def check_for_updates(self, sender=None, silent=False):
+    def check_for_updates(self, _):
         """Check GitHub for updates, and if found, download and replace"""
-        if not silent:
-            self.update_item.title = "Checking..."
+        self.update_item.title = "Checking..."
         
         try:
             req = urllib.request.Request("https://api.github.com/repos/holtsdav/MacMuteOnLocation/releases/latest")
@@ -805,18 +774,16 @@ class LocationMenubarApp(rumps.App):
             current_parts = [int(x) for x in __version__.split('.')]
             
             if latest_parts <= current_parts:
-                if not silent:
-                    rumps.alert("Up to date", f"You are running the latest version ({__version__}).")
-                    self.update_item.title = "Check for Updates"
+                rumps.alert("Up to date", f"You are running the latest version ({__version__}).")
+                self.update_item.title = "Check for Updates"
                 return
                 
             if '.app/Contents/MacOS' not in sys.executable:
-                if not silent:
-                    rumps.alert(
-                        "Update Available", 
-                        f"Version {latest_version} is available, but you are running from source. Please update manually via git pull."
-                    )
-                    self.update_item.title = "Check for Updates"
+                rumps.alert(
+                    "Update Available", 
+                    f"Version {latest_version} is available, but you are running from source. Please update manually via git pull."
+                )
+                self.update_item.title = "Check for Updates"
                 return
                 
             NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -830,14 +797,11 @@ class LocationMenubarApp(rumps.App):
             if response == 1:
                 self._perform_update(data)
             else:
-                if not silent:
-                    self.update_item.title = "Check for Updates"
+                self.update_item.title = "Check for Updates"
                 
         except Exception as e:
-            if not silent:
-                rumps.alert("Update Failed", f"Failed to check for updates: {e}")
-                self.update_item.title = "Check for Updates"
-            print(f"Update check failed: {e}")
+            rumps.alert("Update Failed", f"Failed to check for updates: {e}")
+            self.update_item.title = "Check for Updates"
             traceback.print_exc()
             
     def _perform_update(self, release_data):

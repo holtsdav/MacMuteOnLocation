@@ -6,8 +6,13 @@ with open('main.py', 'r') as f:
     match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', f.read(), re.MULTILINE)
     version = match.group(1) if match else '0.0.1'
 
+import os
+
+# Get all png files in icons directory
+icon_files = [os.path.join('icons', f) for f in os.listdir('icons') if f.endswith('.png')]
+
 APP = ['main.py']
-DATA_FILES = [('', ['location_dark.png'])]
+DATA_FILES = [('', ['location_dark.png']), ('icons', icon_files)]
 OPTIONS = {
     'argv_emulation': False,  # Disable to avoid Carbon framework dependency
     'excludes': ['Carbon'],  # Exclude deprecated Carbon framework
