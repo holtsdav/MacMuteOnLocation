@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -56,6 +56,7 @@ class LocationMenubarApp(rumps.App):
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         self.last_wake_time = time.time()
         self.woke_from_sleep = False # Flag to indicate if the app just woke from sleep
+        self.auto_check_updates = True
         
         # Initialize location manager and delegate
         self.location_manager = None
@@ -73,6 +74,7 @@ class LocationMenubarApp(rumps.App):
         self.autostart_item = rumps.MenuItem(autostart_title, icon=os.path.join(self.script_dir, "icons", "autostart.png"), template=True, callback=self.toggle_autostart)
         
         self.update_item = rumps.MenuItem("Check for Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.check_for_updates)
+        self.auto_update_item = rumps.MenuItem("✓ Auto Check Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.toggle_auto_update)
         
         self.CHECK_INTERVALS = {
             "1 Min": 60,
@@ -102,6 +104,7 @@ class LocationMenubarApp(rumps.App):
             rumps.MenuItem("Refresh Location", icon=os.path.join(self.script_dir, "icons", "refresh.png"), template=True, callback=self.refresh_location),
             None,  # Separator
             self.update_item,
+            self.auto_update_item,
             None,  # Separator
             self.autostart_item,
             None,  # Separator
@@ -126,6 +129,9 @@ class LocationMenubarApp(rumps.App):
         
         # Schedule first-time autostart prompt
         rumps.Timer(self.prompt_autostart_if_needed, 2).start()
+        
+        # Schedule silent update check 5 seconds after launch
+        rumps.Timer(self.silent_update_check, 5).start()
         
         # Template mode handles icon adaptation automatically
         print("Template mode enabled - icon adapts automatically to system appearance and wallpaper brightness")
@@ -487,6 +493,13 @@ class LocationMenubarApp(rumps.App):
                     
                     self.has_prompted_autostart = data.get('settings', {}).get('has_prompted_autostart', False)
                     
+                    saved_auto_check = data.get('settings', {}).get('auto_check_updates', True)
+                    self.auto_check_updates = saved_auto_check
+                    if self.auto_check_updates:
+                        self.auto_update_item.title = "✓ Auto Check Updates"
+                    else:
+                        self.auto_update_item.title = "Auto Check Updates"
+                    
                     # Update wakeup-only menu item
                     if self.only_scan_on_wakeup:
                         self.wakeup_only_item.title = "✓ Only Scan on Wakeup"
@@ -517,7 +530,8 @@ class LocationMenubarApp(rumps.App):
                     'check_interval': self.location_check_interval,
                     'is_active': self.is_active,
                     'only_scan_on_wakeup': self.only_scan_on_wakeup,
-                    'has_prompted_autostart': self.has_prompted_autostart
+                    'has_prompted_autostart': self.has_prompted_autostart,
+                    'auto_check_updates': self.auto_check_updates
                 }
             }
             with open(locations_file, 'w') as f:
@@ -804,6 +818,55 @@ class LocationMenubarApp(rumps.App):
             self.update_item.title = "Check for Updates"
             traceback.print_exc()
             
+    def toggle_auto_update(self, _):
+        self.auto_check_updates = not self.auto_check_updates
+        if self.auto_check_updates:
+            self.auto_update_item.title = "✓ Auto Check Updates"
+        else:
+            self.auto_update_item.title = "Auto Check Updates"
+        self.save_target_locations()
+
+    def silent_update_check(self, sender=None):
+        """Silently check for updates on launch"""
+        if sender:
+            sender.stop()
+            
+        if not self.auto_check_updates:
+            return
+            
+        try:
+            req = urllib.request.Request("https://api.github.com/repos/holtsdav/MacMuteOnLocation/releases/latest")
+            req.add_header('User-Agent', 'MacMuteOnLocation-Updater')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+            latest_version = data.get('tag_name', '').lstrip('v')
+            if not latest_version:
+                return
+                
+            latest_parts = [int(x) for x in latest_version.split('.')]
+            current_parts = [int(x) for x in __version__.split('.')]
+            if latest_parts <= current_parts:
+                return
+                
+            if '.app/Contents/MacOS' not in sys.executable:
+                print(f"Silent update: Version {latest_version} available, but not running compiled app.")
+                return
+                
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            response = rumps.alert(
+                title='Update Available',
+                message=f'Version {latest_version} is available (Current: {__version__}).\nWould you like to install it now? The app will restart.',
+                ok='Update Now',
+                cancel='Later'
+            )
+            
+            if response == 1:
+                self._perform_update(data)
+                
+        except Exception as e:
+            print(f"Silent update check failed: {e}")
+
     def _perform_update(self, release_data):
         self.update_item.title = "Downloading..."
         
