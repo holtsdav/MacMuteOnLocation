@@ -18,7 +18,7 @@ import threading
 from PyObjCTools import AppHelper
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -180,9 +180,10 @@ class LocationMenubarApp(rumps.App):
                 print("Requesting location authorization...")
                 self.location_manager.requestWhenInUseAuthorization()
             elif auth_status in [kCLAuthorizationStatusAuthorizedAlways, kCLAuthorizationStatusAuthorizedWhenInUse]:
-                print("Location already authorized")
+                print("Location already authorized. App opened: requesting initial location update...")
                 self.enable_location_item.hide()
-                # Don't start continuous updates here - only when needed
+                self.location_item.title = "Location: Scanning..."
+                self.location_manager.requestLocation()
             else:
                 print(f"Location access denied or restricted: {auth_status}")
                 self.enable_location_item.show()
@@ -1085,8 +1086,12 @@ class LocationDelegate(objc.lookUpClass('NSObject')):
             status_string = "Not Determined"
         elif status == kCLAuthorizationStatusAuthorizedAlways or status == kCLAuthorizationStatusAuthorizedWhenInUse:
             status_string = "Authorized"
-            print(f"Authorization status: {status_string}. Location access granted.")
-            # Don't automatically start continuous updates - only when needed
+            print(f"Authorization status: {status_string}. Location access granted. Requesting initial location update...")
+            app = self.app()
+            if app:
+                app.location_item.title = "Location: Scanning..."
+                if app.location_manager:
+                    app.location_manager.requestLocation()
         elif status == kCLAuthorizationStatusDenied:
             status_string = "Denied"
         elif status == kCLAuthorizationStatusRestricted:
