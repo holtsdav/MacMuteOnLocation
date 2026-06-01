@@ -14,9 +14,11 @@ import urllib.request
 import zipfile
 import tempfile
 import shutil
+import threading
+from PyObjCTools import AppHelper
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -867,44 +869,50 @@ class LocationMenubarApp(rumps.App):
         except Exception as e:
             print(f"Silent update check failed: {e}")
 
+    def _show_update_error(self, error_msg):
+        self.update_item.title = "Check for Updates"
+        rumps.alert("Error", f"Failed to install update: {error_msg}")
+
     def _perform_update(self, release_data):
         self.update_item.title = "Downloading..."
         
-        assets = release_data.get('assets', [])
-        zip_url = None
-        for asset in assets:
-            if asset.get('name', '').endswith('.zip'):
-                zip_url = asset.get('browser_download_url')
-                break
-                
-        if not zip_url:
-            rumps.alert("Error", "No pre-built app zip found in the release.")
-            self.update_item.title = "Check for Updates"
-            return
-            
-        try:
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, "update.zip")
-            urllib.request.urlretrieve(zip_url, zip_path)
-            
-            self.update_item.title = "Extracting..."
-            # Use command line unzip to preserve executable permissions
-            subprocess.run(["unzip", "-q", zip_path, "-d", temp_dir], check=True)
-                
-            extracted_app = os.path.join(temp_dir, "MacMuteOnLocation.app")
-            if not os.path.exists(extracted_app):
-                for root, dirs, files in os.walk(temp_dir):
-                    if "MacMuteOnLocation.app" in dirs:
-                        extracted_app = os.path.join(root, "MacMuteOnLocation.app")
+        def update_worker():
+            try:
+                assets = release_data.get('assets', [])
+                zip_url = None
+                for asset in assets:
+                    if asset.get('name', '').endswith('.zip'):
+                        zip_url = asset.get('browser_download_url')
                         break
                         
-            if not os.path.exists(extracted_app):
-                raise Exception("Could not find MacMuteOnLocation.app in the downloaded archive.")
+                if not zip_url:
+                    raise Exception("No pre-built app zip found in the release.")
+                    
+                temp_dir = tempfile.mkdtemp()
+                zip_path = os.path.join(temp_dir, "update.zip")
+                urllib.request.urlretrieve(zip_url, zip_path)
                 
-            current_app_path = sys.executable.split('.app/Contents/MacOS')[0] + '.app'
-            script_path = os.path.join(temp_dir, "update.sh")
-            
-            script_content = f'''#!/bin/bash
+                def set_extracting():
+                    self.update_item.title = "Extracting..."
+                AppHelper.callAfter(set_extracting)
+                
+                # Use command line unzip to preserve executable permissions
+                subprocess.run(["unzip", "-q", zip_path, "-d", temp_dir], check=True)
+                    
+                extracted_app = os.path.join(temp_dir, "MacMuteOnLocation.app")
+                if not os.path.exists(extracted_app):
+                    for root, dirs, files in os.walk(temp_dir):
+                        if "MacMuteOnLocation.app" in dirs:
+                            extracted_app = os.path.join(root, "MacMuteOnLocation.app")
+                            break
+                            
+                if not os.path.exists(extracted_app):
+                    raise Exception("Could not find MacMuteOnLocation.app in the downloaded archive.")
+                    
+                current_app_path = sys.executable.split('.app/Contents/MacOS')[0] + '.app'
+                script_path = os.path.join(temp_dir, "update.sh")
+                
+                script_content = f'''#!/bin/bash
 sleep 2
 rm -rf "{current_app_path}"
 mv "{extracted_app}" "{current_app_path}"
@@ -912,17 +920,19 @@ xattr -cr "{current_app_path}" || true
 open "{current_app_path}"
 rm -rf "{temp_dir}"
 '''
-            with open(script_path, 'w') as f:
-                f.write(script_content)
+                with open(script_path, 'w') as f:
+                    f.write(script_content)
+                    
+                os.chmod(script_path, 0o755)
+                subprocess.Popen([script_path], start_new_session=True)
+                AppHelper.callAfter(rumps.quit_application)
                 
-            os.chmod(script_path, 0o755)
-            subprocess.Popen([script_path], start_new_session=True)
-            rumps.quit_application()
-            
-        except Exception as e:
-            rumps.alert("Error", f"Failed to install update: {e}")
-            self.update_item.title = "Check for Updates"
-            traceback.print_exc()
+            except Exception as e:
+                traceback.print_exc()
+                AppHelper.callAfter(self._show_update_error, str(e))
+                
+        # Start background thread
+        threading.Thread(target=update_worker, daemon=True).start()
 
     def is_in_login_items(self):
         """Check if the app is in the user's login items"""
