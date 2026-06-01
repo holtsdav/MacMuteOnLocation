@@ -770,7 +770,10 @@ class LocationMenubarApp(rumps.App):
             if not latest_version:
                 raise Exception("Could not determine latest version")
                 
-            if latest_version <= __version__:
+            latest_parts = [int(x) for x in latest_version.split('.')]
+            current_parts = [int(x) for x in __version__.split('.')]
+            
+            if latest_parts <= current_parts:
                 rumps.alert("Up to date", f"You are running the latest version ({__version__}).")
                 self.update_item.title = "Check for Updates"
                 return
