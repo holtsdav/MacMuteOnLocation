@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -888,8 +888,8 @@ class LocationMenubarApp(rumps.App):
             urllib.request.urlretrieve(zip_url, zip_path)
             
             self.update_item.title = "Extracting..."
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
+            # Use command line unzip to preserve executable permissions
+            subprocess.run(["unzip", "-q", zip_path, "-d", temp_dir], check=True)
                 
             extracted_app = os.path.join(temp_dir, "MacMuteOnLocation.app")
             if not os.path.exists(extracted_app):
@@ -908,6 +908,7 @@ class LocationMenubarApp(rumps.App):
 sleep 2
 rm -rf "{current_app_path}"
 mv "{extracted_app}" "{current_app_path}"
+xattr -cr "{current_app_path}" || true
 open "{current_app_path}"
 rm -rf "{temp_dir}"
 '''
