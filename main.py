@@ -16,7 +16,7 @@ import tempfile
 import shutil
 from AppKit import NSApplication, NSWorkspace
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 from Foundation import NSNotificationCenter
 from CoreLocation import (
     CLLocationManager, CLGeocoder,
@@ -74,7 +74,7 @@ class LocationMenubarApp(rumps.App):
         self.autostart_item = rumps.MenuItem(autostart_title, icon=os.path.join(self.script_dir, "icons", "autostart.png"), template=True, callback=self.toggle_autostart)
         
         self.update_item = rumps.MenuItem("Check for Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.check_for_updates)
-        self.auto_update_item = rumps.MenuItem("✓ Auto Check Updates", icon=os.path.join(self.script_dir, "icons", "update.png"), template=True, callback=self.toggle_auto_update)
+        self.auto_update_item = rumps.MenuItem("✓ Auto Check Updates", icon=os.path.join(self.script_dir, "icons", "settings.png"), template=True, callback=self.toggle_auto_update)
         
         self.CHECK_INTERVALS = {
             "1 Min": 60,
